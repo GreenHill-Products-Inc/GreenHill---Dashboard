@@ -224,7 +224,7 @@ td:not(:first-child){text-align:right;font-variant-numeric:tabular-nums}
 </div>
 
 <script>
-const CSV_URL = "https://docs.google.com/spreadsheets/d/16qblozRO6Fyly78cH5AzN0tKyEfI7U2JDi3v9D0Yo6g/export?format=csv&gid=870170198";
+const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR8H-XuiRabvzylwxl-EimiBpwFtmH8PzytP_VuvLJv3hFoaLZdT-FSnY1FxXbOYeC3Zb9ZS42ObYil/pub?gid=870170198&single=true&output=csv";
 const REPS    = ['Lillian Martinez','Charles Hemingway','Cory Martinez','House Account'];
 const RC      = ['#76BC21','#2471A3','#D68910','#8E44AD'];
 const RB      = ['rgba(118,188,33,.7)','rgba(36,113,163,.7)','rgba(214,137,16,.7)','rgba(142,68,173,.7)'];
@@ -344,7 +344,7 @@ function renderCumulative(rows){
   buildDonut('cType',['Builder','Homeowner'],[rows.filter(r=>r['Customer Type']==='Builder').length,rows.filter(r=>r['Customer Type']==='Homeowner').length],['rgba(36,113,163,.8)','rgba(118,188,33,.8)'],['#2471A3','#76BC21']);
   const w=wks();
   buildLine('cTrend',w.map(x=>'W'+x),REPS.filter(rep=>rows.some(r=>r['Sales Rep']===rep)).map((rep,i)=>({label:rep.split(' ')[0],data:w.map(x=>rows.filter(r=>r['Sales Rep']===rep&&String(r['Week #'])===String(x)).length),borderColor:RC[i],backgroundColor:'transparent',tension:.35,pointRadius:4,pointBackgroundColor:RC[i],borderWidth:2})));
-  buildBar('cValRep',rL(rows),[{label:'Value Sold',data:rL(rows).map(rep=>rows.filter(r=>r['Sales Rep']===rep&&r['Status']==='Approved').reduce((s,r)=>s+(+r['Estimate Value']||0),0)),backgroundColor:RB,borderColor:RC,borderWidth:1,borderRadius:5}],{money:true});
+  buildBar('cValRep',rL(rows),[{label:'Value Sold',data:rL(rows).map(rep=>rows.filter(r=>r['Sales Rep']===rep&&r['Status']==='Approved').reduce((s,r)=>s+cleanVal(r['Estimate Value']),0)),backgroundColor:RB,borderColor:RC,borderWidth:1,borderRadius:5}],{money:true});
   buildDonut('cStatus',['Approved','Estimate Sent','Lost'],[s.approved,s.sent,s.lost],['rgba(118,188,33,.85)','rgba(214,137,16,.85)','rgba(192,57,43,.85)'],['#76BC21','#D68910','#C0392B']);
 }
 
@@ -371,7 +371,7 @@ function renderWeekly(rows){
   <tbody id="wDetail"></tbody></table></div>`);
   const db=document.getElementById('wDetail');
   rows.forEach(r=>{const bc=r['Status']==='Approved'?'b-approved':r['Status']==='Lost'?'b-lost':'b-sent';const dc=r['Status']==='Approved'?'d-approved':r['Status']==='Lost'?'d-lost':'d-sent';
-  db.innerHTML+=`<tr class="${dc}"><td>${r['Date']||''}</td><td class="rep-bold">${(r['Sales Rep']||'').split(' ')[0]}</td><td>${r['Client / Builder']||''}</td><td>${r['Subdivision']||'—'}</td><td style="text-align:center">${r['Lot #']||'—'}</td><td>${r['Customer Type']||''}</td><td>${r['Estimate Value']?fmt(+r['Estimate Value']):''}</td><td><span class="badge ${bc}">${r['Status']||''}</span></td><td style="color:var(--mid);text-align:center">${r['Week #']||''}</td></tr>`;});
+  db.innerHTML+=`<tr class="${dc}"><td>${r['Date']||''}</td><td class="rep-bold">${(r['Sales Rep']||'').split(' ')[0]}</td><td>${r['Client / Builder']||''}</td><td>${r['Subdivision']||'—'}</td><td style="text-align:center">${r['Lot #']||'—'}</td><td>${r['Customer Type']||''}</td><td>${r['Estimate Value']?fmt(cleanVal(r['Estimate Value'])):''}</td><td><span class="badge ${bc}">${r['Status']||''}</span></td><td style="color:var(--mid);text-align:center">${r['Week #']||''}</td></tr>`;});
   buildStacked('wBar',rL(rows),[
     {label:'Estimate Sent',data:rD(rows,'Estimate Sent'),backgroundColor:'rgba(214,137,16,.75)',borderColor:'#D68910',borderWidth:1},
     {label:'Approved',data:rD(rows,'Approved'),backgroundColor:'rgba(118,188,33,.8)',borderColor:'#76BC21',borderWidth:1},
@@ -405,23 +405,23 @@ function renderByRep(rows){
   repTable(rows,'rBody');
   const cd=rL(rows).map(rep=>{const rr=rows.filter(r=>r['Sales Rep']===rep);return rr.length?Math.round(rows.filter(r=>r['Sales Rep']===rep&&r['Status']==='Approved').length/rr.length*100):0;});
   buildBar('rConv',rL(rows),[{label:'Conv %',data:cd,backgroundColor:cd.map(v=>v>=80?'rgba(118,188,33,.8)':v>=60?'rgba(214,137,16,.75)':'rgba(192,57,43,.75)'),borderColor:cd.map(v=>v>=80?'#76BC21':v>=60?'#D68910':'#C0392B'),borderWidth:1,borderRadius:6}],{pct:true});
-  const td=rL(rows).map(rep=>{const rr=rows.filter(r=>r['Sales Rep']===rep&&r['Status']==='Approved');return rr.length?Math.round(rr.reduce((s,r)=>s+(+r['Estimate Value']||0),0)/rr.length):0;});
+  const td=rL(rows).map(rep=>{const rr=rows.filter(r=>r['Sales Rep']===rep&&r['Status']==='Approved');return rr.length?Math.round(rr.reduce((s,r)=>s+cleanVal(r['Estimate Value']),0)/rr.length):0;});
   buildBar('rTicket',rL(rows),[{label:'Avg Ticket',data:td,backgroundColor:RB,borderColor:RC,borderWidth:1,borderRadius:6}],{money:true});
   buildLine('rWkLine',w.map(x=>'Week '+x),REPS.filter(rep=>rows.some(r=>r['Sales Rep']===rep)).map((rep,i)=>({label:rep.split(' ')[0],data:w.map(x=>rows.filter(r=>r['Sales Rep']===rep&&String(r['Week #'])===String(x)).length),borderColor:RC[i],backgroundColor:'transparent',tension:.3,pointRadius:5,pointBackgroundColor:RC[i],borderWidth:2})));
-  buildLine('rWkVal',w.map(x=>'Week '+x),REPS.filter(rep=>rows.some(r=>r['Sales Rep']===rep)).map((rep,i)=>({label:rep.split(' ')[0],data:w.map(x=>rows.filter(r=>r['Sales Rep']===rep&&String(r['Week #'])===String(x)&&r['Status']==='Approved').reduce((s,r)=>s+(+r['Estimate Value']||0),0)),borderColor:RC[i],backgroundColor:RB[i].replace('.7','.1'),fill:true,tension:.3,pointRadius:4,pointBackgroundColor:RC[i],borderWidth:2})),{money:true});
+  buildLine('rWkVal',w.map(x=>'Week '+x),REPS.filter(rep=>rows.some(r=>r['Sales Rep']===rep)).map((rep,i)=>({label:rep.split(' ')[0],data:w.map(x=>rows.filter(r=>r['Sales Rep']===rep&&String(r['Week #'])===String(x)&&r['Status']==='Approved').reduce((s,r)=>s+cleanVal(r['Estimate Value']),0)),borderColor:RC[i],backgroundColor:RB[i].replace('.7','.1'),fill:true,tension:.3,pointRadius:4,pointBackgroundColor:RC[i],borderWidth:2})),{money:true});
 }
 
 // ── PRODUCTS ──────────────────────────────────────────────────────────────────
 function renderProducts(rows){
-  const pd=PRODUCTS.map(p=>({name:p,count:rows.filter(r=>r[p]==='Yes').length,valQ:rows.filter(r=>r[p]==='Yes').reduce((s,r)=>s+(+r['Estimate Value']||0),0),valS:rows.filter(r=>r[p]==='Yes'&&r['Status']==='Approved').reduce((s,r)=>s+(+r['Estimate Value']||0),0)})).sort((a,b)=>b.count-a.count).filter(p=>p.count>0);
+  const pd=PRODUCTS.map(p=>({name:p,count:rows.filter(r=>r[p]==='Yes').length,valQ:rows.filter(r=>r[p]==='Yes').reduce((s,r)=>s+cleanVal(r['Estimate Value']),0),valS:rows.filter(r=>r[p]==='Yes'&&r['Status']==='Approved').reduce((s,r)=>s+cleanVal(r['Estimate Value']),0)})).sort((a,b)=>b.count-a.count).filter(p=>p.count>0);
   const top=pd[0]||{name:'—',count:0,valS:0};
   set(`
   <div class="kpi-grid">
     ${kpi('Product Lines Active',pd.length,'purple','Unique lines this period')}
     ${kpi('Most Quoted',top.name,'green',top.count+' estimates')}
     ${kpi('Top by Revenue',[...pd].sort((a,b)=>b.valS-a.valS)[0]?.name||'—','blue',[...pd].sort((a,b)=>b.valS-a.valS)[0]?fmt([...pd].sort((a,b)=>b.valS-a.valS)[0].valS)+' sold':'')}
-    ${kpi('Total Quoted',fmt(rows.reduce((s,r)=>s+(+r['Estimate Value']||0),0)),'','','','font-size:20px')}
-    ${kpi('Total Sold',fmt(rows.filter(r=>r['Status']==='Approved').reduce((s,r)=>s+(+r['Estimate Value']||0),0)),'green','','','font-size:20px')}
+    ${kpi('Total Quoted',fmt(rows.reduce((s,r)=>s+cleanVal(r['Estimate Value']),0)),'','','','font-size:20px')}
+    ${kpi('Total Sold',fmt(rows.filter(r=>r['Status']==='Approved').reduce((s,r)=>s+cleanVal(r['Estimate Value']),0)),'green','','','font-size:20px')}
   </div>
   <div class="charts-row col2">
     <div class="chart-card"><div class="chart-header"><div class="chart-title">Estimates by Product Line</div></div><div class="chart-wrap h220"><canvas id="pProd"></canvas></div></div>
@@ -446,7 +446,7 @@ function renderInsights(rows){
   // Avg ticket per rep
   const tickets = REPS.map(rep=>{
     const rr=approved.filter(r=>r['Sales Rep']===rep);
-    return{rep,avg:rr.length?Math.round(rr.reduce((s,r)=>s+(+r['Estimate Value']||0),0)/rr.length):0,count:rr.length};
+    return{rep,avg:rr.length?Math.round(rr.reduce((s,r)=>s+cleanVal(r['Estimate Value']),0)/rr.length):0,count:rr.length};
   }).filter(x=>x.count>0).sort((a,b)=>b.avg-a.avg);
 
   // Close time (days between Date and Close Date)
@@ -463,10 +463,10 @@ function renderInsights(rows){
   }).filter(x=>x.count>0);
 
   // Lost analysis
-  const lostValTotal = lost.reduce((s,r)=>s+(+r['Value Lost']||+r['Estimate Value']||0),0);
+  const lostValTotal = lost.reduce((s,r)=>s+cleanVal(r['Value Lost']||r['Estimate Value']),0);
   const lostByRep = REPS.map(rep=>({
     rep, count:lost.filter(r=>r['Sales Rep']===rep).length,
-    val:lost.filter(r=>r['Sales Rep']===rep).reduce((s,r)=>s+(+r['Value Lost']||+r['Estimate Value']||0),0)
+    val:lost.filter(r=>r['Sales Rep']===rep).reduce((s,r)=>s+cleanVal(r['Value Lost']||r['Estimate Value']),0)
   })).filter(x=>x.count>0);
   const lostRate = rows.length?Math.round(lost.length/rows.length*100):0;
 
@@ -474,7 +474,7 @@ function renderInsights(rows){
 
   set(`
   <div class="kpi-grid-4">
-    ${kpi('Avg Ticket (Approved)',tickets[0]?fmt(Math.round(approved.reduce((s,r)=>s+(+r['Estimate Value']||0),0)/Math.max(approved.length,1))):'—','green','Across all approved')}
+    ${kpi('Avg Ticket (Approved)',tickets[0]?fmt(Math.round(approved.reduce((s,r)=>s+cleanVal(r['Estimate Value']),0)/Math.max(approved.length,1))):'—','green','Across all approved')}
     ${kpi('Avg Close Time',avgClose!==null?avgClose+' days':'No data','blue',avgClose!==null?'From estimate to close':'Add Close Date to track')}
     ${kpi('Lost Deals',lost.length,'red',fmt(lostValTotal)+' in value lost')}
     ${kpi('Loss Rate',lostRate+'%',lostRate>20?'red':lostRate>10?'amber':'green',lost.length+' lost of '+rows.length+' total')}
@@ -513,7 +513,7 @@ function renderInsights(rows){
       <div class="chart-header"><div class="chart-title">Lost Deals — Detail</div></div>
       ${lost.length===0?'<p style="padding:20px;color:var(--mid);font-size:13px;text-align:center">No lost deals in this period 🎉</p>':
       `<table><thead><tr><th>Date</th><th>Rep</th><th>Client</th><th>Subdivision</th><th>Type</th><th>Value Lost</th><th>Notes</th></tr></thead>
-      <tbody>${lost.map((r,i)=>`<tr style="${i%2===1?'background:var(--panel2)':''}"><td>${r['Date']||''}</td><td class="rep-bold" style="color:var(--red)">${(r['Sales Rep']||'').split(' ')[0]}</td><td>${r['Client / Builder']||''}</td><td>${r['Subdivision']||'—'}</td><td>${r['Customer Type']||''}</td><td style="color:var(--red);font-weight:700">${fmt(+(r['Value Lost']||r['Estimate Value']||0))}</td><td style="font-size:11px;color:var(--mid)">${r['Notes']||'—'}</td></tr>`).join('')}</tbody></table>`}
+      <tbody>${lost.map((r,i)=>`<tr style="${i%2===1?'background:var(--panel2)':''}"><td>${r['Date']||''}</td><td class="rep-bold" style="color:var(--red)">${(r['Sales Rep']||'').split(' ')[0]}</td><td>${r['Client / Builder']||''}</td><td>${r['Subdivision']||'—'}</td><td>${r['Customer Type']||''}</td><td style="color:var(--red);font-weight:700">${fmt(cleanVal(r['Value Lost']||r['Estimate Value']))}</td><td style="font-size:11px;color:var(--mid)">${r['Notes']||'—'}</td></tr>`).join('')}</tbody></table>`}
     </div>
   </div>`);
 
@@ -525,7 +525,7 @@ function renderInsights(rows){
 // ── PIPELINE ──────────────────────────────────────────────────────────────────
 function renderPipeline(rows){
   const pipe=rows.filter(r=>r['Status']==='Estimate Sent');
-  const valP=pipe.reduce((s,r)=>s+(+r['Estimate Value']||0),0);
+  const valP=pipe.reduce((s,r)=>s+cleanVal(r['Estimate Value']),0);
   set(`
   <div class="kpi-grid">
     ${kpi('Open Estimates',pipe.length,'amber','Estimate Sent — pending')}
@@ -543,7 +543,7 @@ function renderPipeline(rows){
   <tbody id="ppBody"></tbody></table></div>`);
   const pb=document.getElementById('ppBody');
   if(!pipe.length){pb.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--mid);padding:30px">No open estimates — all closed! 🎉</td></tr>';}
-  else pipe.forEach(r=>{pb.innerHTML+=`<tr class="d-sent"><td>${r['Date']||''}</td><td class="rep-bold">${(r['Sales Rep']||'').split(' ')[0]}</td><td>${r['Client / Builder']||''}</td><td>${r['Subdivision']||'—'}</td><td style="text-align:center">${r['Lot #']||'—'}</td><td>${r['Customer Type']||''}</td><td>${r['Estimate Value']?fmt(+r['Estimate Value']):''}</td><td style="color:var(--mid);text-align:center">${r['Week #']||''}</td></tr>`;});
+  else pipe.forEach(r=>{pb.innerHTML+=`<tr class="d-sent"><td>${r['Date']||''}</td><td class="rep-bold">${(r['Sales Rep']||'').split(' ')[0]}</td><td>${r['Client / Builder']||''}</td><td>${r['Subdivision']||'—'}</td><td style="text-align:center">${r['Lot #']||'—'}</td><td>${r['Customer Type']||''}</td><td>${r['Estimate Value']?fmt(cleanVal(r['Estimate Value'])):''}</td><td style="color:var(--mid);text-align:center">${r['Week #']||''}</td></tr>`;});
   const pr=REPS.filter(rep=>pipe.some(r=>r['Sales Rep']===rep));
   buildBar('ppRep',pr.map(r=>r.split(' ')[0]),[{label:'Open',data:pr.map(rep=>pipe.filter(r=>r['Sales Rep']===rep).length),backgroundColor:'rgba(214,137,16,.75)',borderColor:'#D68910',borderWidth:1,borderRadius:5}],{});
   buildDonut('ppType',['Builder','Homeowner'],[pipe.filter(r=>r['Customer Type']==='Builder').length,pipe.filter(r=>r['Customer Type']==='Homeowner').length],['rgba(36,113,163,.8)','rgba(118,188,33,.8)'],['#2471A3','#76BC21']);
@@ -562,9 +562,9 @@ function stats(rows){
   const total=rows.length,approved=rows.filter(r=>r['Status']==='Approved').length,
     sent=rows.filter(r=>r['Status']==='Estimate Sent').length,lost=rows.filter(r=>r['Status']==='Lost').length,
     conv=total?Math.round(approved/total*100):0,
-    valQ=rows.reduce((s,r)=>s+(+r['Estimate Value']||0),0),
-    valS=rows.filter(r=>r['Status']==='Approved').reduce((s,r)=>s+(+r['Estimate Value']||0),0),
-    valL=rows.filter(r=>r['Status']==='Lost').reduce((s,r)=>s+(+r['Value Lost']||0),0);
+    valQ=rows.reduce((s,r)=>s+cleanVal(r['Estimate Value']),0),
+    valS=rows.filter(r=>r['Status']==='Approved').reduce((s,r)=>s+cleanVal(r['Estimate Value']),0),
+    valL=rows.filter(r=>r['Status']==='Lost').reduce((s,r)=>s+cleanVal(r['Value Lost']),0);
   return{total,approved,sent,lost,conv,valQ,valS,valL};
 }
 function rL(rows){return REPS.filter(r=>rows.some(x=>x['Sales Rep']===r));}
@@ -576,7 +576,7 @@ function repTable(rows,bodyId){
     const rr=rows.filter(r=>r['Sales Rep']===rep);
     const app=rr.filter(r=>r['Status']==='Approved').length,st=rr.filter(r=>r['Status']==='Estimate Sent').length,lo=rr.filter(r=>r['Status']==='Lost').length;
     const conv=rr.length?Math.round(app/rr.length*100):0;
-    const vq=rr.reduce((s,r)=>s+(+r['Estimate Value']||0),0),vs=rr.filter(r=>r['Status']==='Approved').reduce((s,r)=>s+(+r['Estimate Value']||0),0),vl=rr.filter(r=>r['Status']==='Lost').reduce((s,r)=>s+(+r['Value Lost']||0),0);
+    const vq=rr.reduce((s,r)=>s+cleanVal(r['Estimate Value']),0),vs=rr.filter(r=>r['Status']==='Approved').reduce((s,r)=>s+cleanVal(r['Estimate Value']),0),vl=rr.filter(r=>r['Status']==='Lost').reduce((s,r)=>s+cleanVal(r['Value Lost']),0);
     const avgT=app?Math.round(vs/app):0;
     ts+=st;ta+=app;tl+=lo;tq+=vq;ts2+=vs;tvl+=vl;tot+=rr.length;
     const c=conv>=80?'hi':conv>=60?'md':'lo';
@@ -590,6 +590,22 @@ function set(html){document.getElementById('mainContent').innerHTML=html;}
 function fmt(n){return'$'+Math.round(n).toLocaleString('en-US');}
 function kpi(label,val,color,sub='',extra='',style=''){return`<div class="kpi ${color}"><div class="kpi-label">${label}</div><div class="kpi-val ${color}" style="${style}">${val}</div>${sub?`<div class="kpi-sub">${sub}</div>`:''}${extra}</div>`;}
 function bdg(text,color){return`<div class="kpi-badge ${color}">${text}</div>`;}
+
+// Clean monetary values from Google Sheets — handles $3,200.00 / $3.200,00 / 3200 / "3,200"
+function cleanVal(v){
+  if(!v||v===''||v==='-')return 0;
+  // Remove currency symbols, spaces
+  let s = String(v).replace(/[$€£\s]/g,'').trim();
+  // Detect European format: 3.200,00 → has comma as decimal separator
+  if(/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)){
+    s = s.replace(/\./g,'').replace(',','.');
+  } else {
+    // Remove thousand separators (commas), keep decimal dot
+    s = s.replace(/,/g,'');
+  }
+  const n = parseFloat(s);
+  return isNaN(n)?0:n;
+}
 </script>
 </body>
 </html>
