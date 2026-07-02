@@ -243,7 +243,10 @@ async function syncData(){
     const res = await fetch(CSV_URL);
     if(!res.ok) throw new Error('HTTP '+res.status+'. Make sure the sheet is published to web.');
     const text = await res.text();
-    Papa.parse(text,{header:true,skipEmptyLines:true,complete:result=>{
+    // Skip first 4 rows (title + subtitle + spacer + group labels), row 5 has real headers
+    const lines = text.split('\n');
+    const csvFromRow5 = lines.slice(4).join('\n');
+    Papa.parse(csvFromRow5,{header:true,skipEmptyLines:true,complete:result=>{
       allRows=result.data.filter(r=>r['Sales Rep']&&r['Status']);
       if(!allRows.length) throw new Error('No valid rows found. Check sheet headers.');
       populateWeeks();
