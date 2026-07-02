@@ -202,6 +202,9 @@ td:not(:first-child){text-align:right;font-variant-numeric:tabular-nums}
       </div>
       <div class="topbar-right">
         <div class="last-sync" id="lastSyncLabel">—</div>
+        <select id="filterMonth" class="top-select" onchange="render()" style="display:none">
+          <option value="all">All Months</option>
+        </select>
         <select id="filterWeek" class="top-select" onchange="render()" style="display:none">
           <option value="all">All Weeks</option>
         </select>
@@ -255,6 +258,7 @@ async function syncData(){
       document.getElementById('lastSyncLabel').textContent='Synced: '+now;
       document.getElementById('lastSyncLabel').className='last-sync fresh';
       document.getElementById('periodTabsWrap').style.display='flex';
+      document.getElementById('filterMonth').style.display='';
       document.getElementById('periodLabel').textContent=allRows.length+' estimates · Google Sheets live data';
       btn.classList.remove('spinning'); btn.disabled=false;
       render();
@@ -272,27 +276,88 @@ function setView(v,el){
   document.querySelectorAll('.nav-item').forEach(i=>i.classList.remove('active'));
   el.classList.add('active');
   document.getElementById('filterWeek').style.display=(v==='weekly')?'':'none';
+  document.getElementById('filterMonth').style.display=(v==='cumulative'||v==='weekly'||v==='reps'||v==='products'||v==='insights'||v==='pipeline')?'':'none';
   render();
 }
 function setPtab(el){document.querySelectorAll('.ptab').forEach(t=>t.classList.remove('active'));el.classList.add('active');}
+function parseDate(str){
+  if(!str) return null;
+  const p=str.split('/');
+  if(p.length<3) return null;
+  const d=new Date(+p[2],+p[0]-1,+p[1]);
+  return isNaN(d)?null:d;
+}
+function fmtDate(d){
+  if(!d) return '';
+  return d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+}
 function populateWeeks(){
-  const ws=[...new Set(allRows.map(r=>r['Week #']))].filter(Boolean).sort((a,b)=>+a-+b);
+  // Build week date ranges from actual dates
+  const weekMap={};
+  allRows.forEach(r=>{
+    const w=r['Week #'];
+    const d=parseDate(r['Date']);
+    if(!w||!d) return;
+    if(!weekMap[w]){weekMap[w]={min:d,max:d};}
+    else{if(d<weekMap[w].min)weekMap[w].min=d;if(d>weekMap[w].max)weekMap[w].max=d;}
+  });
+  const ws=Object.keys(weekMap).sort((a,b)=>+a-+b);
   const sel=document.getElementById('filterWeek');
   sel.innerHTML='<option value="all">All Weeks</option>';
-  ws.forEach(w=>{const o=document.createElement('option');o.value=w;o.textContent='Week '+w;sel.appendChild(o);});
+  ws.forEach(w=>{
+    const o=document.createElement('option');
+    o.value=w;
+    const range=weekMap[w];
+    const label=range ? `Week ${w}  (${fmtDate(range.min)} – ${fmtDate(range.max)})` : `Week ${w}`;
+    o.textContent=label;
+    sel.appendChild(o);
+  });
+  // Populate months
+  const monthSet={};
+  allRows.forEach(r=>{
+    const d=parseDate(r['Date']);
+    if(!d) return;
+    const key=d.getFullYear()+'-'+(d.getMonth()+1).toString().padStart(2,'0');
+    const label=d.toLocaleDateString('en-US',{month:'long',year:'numeric'});
+    monthSet[key]=label;
+  });
+  const msel=document.getElementById('filterMonth');
+  msel.innerHTML='<option value="all">All Months</option>';
+  Object.keys(monthSet).sort().forEach(k=>{
+    const o=document.createElement('option');
+    o.value=k;
+    o.textContent=monthSet[k];
+    msel.appendChild(o);
+  });
 }
 function getFiltered(){
   const rep=document.getElementById('filterRep').value;
   const type=document.getElementById('filterType').value;
   const week=document.getElementById('filterWeek').value;
+  const month=document.getElementById('filterMonth').value;
   return allRows.filter(r=>{
     if(rep!=='all'&&r['Sales Rep']!==rep)return false;
     if(type!=='all'&&r['Customer Type']!==type)return false;
     if(activeView==='weekly'&&week!=='all'&&String(r['Week #'])!==week)return false;
+    if(month!=='all'){
+      const d=parseDate(r['Date']);
+      if(!d) return false;
+      const rKey=d.getFullYear()+'-'+(d.getMonth()+1).toString().padStart(2,'0');
+      if(rKey!==month) return false;
+    }
     return true;
   });
 }
 function wks(){return[...new Set(allRows.map(r=>r['Week #']))].filter(Boolean).sort((a,b)=>+a-+b);}
+function wkLabel(w){
+  // Build date range label for a week number
+  const rows=allRows.filter(r=>String(r['Week #'])===String(w));
+  const dates=rows.map(r=>parseDate(r['Date'])).filter(Boolean);
+  if(!dates.length) return 'Wk '+w;
+  const mn=new Date(Math.min(...dates.map(d=>d.getTime())));
+  const mx=new Date(Math.max(...dates.map(d=>d.getTime())));
+  return fmtDate(mn)==fmtDate(mx)?fmtDate(mn):fmtDate(mn)+' – '+fmtDate(mx);
+}
 
 // ── RENDER ─────────────────────────────────────────────────────────────────────
 function render(){
@@ -343,7 +408,7 @@ function renderCumulative(rows){
   buildBar('cConv',rL(rows),[{label:'Conv %',data:cd,backgroundColor:cd.map(v=>v>=80?'rgba(118,188,33,.8)':v>=60?'rgba(214,137,16,.75)':'rgba(192,57,43,.75)'),borderColor:cd.map(v=>v>=80?'#76BC21':v>=60?'#D68910':'#C0392B'),borderWidth:1,borderRadius:5}],{pct:true});
   buildDonut('cType',['Builder','Homeowner'],[rows.filter(r=>r['Customer Type']==='Builder').length,rows.filter(r=>r['Customer Type']==='Homeowner').length],['rgba(36,113,163,.8)','rgba(118,188,33,.8)'],['#2471A3','#76BC21']);
   const w=wks();
-  buildLine('cTrend',w.map(x=>'W'+x),REPS.filter(rep=>rows.some(r=>r['Sales Rep']===rep)).map((rep,i)=>({label:rep.split(' ')[0],data:w.map(x=>rows.filter(r=>r['Sales Rep']===rep&&String(r['Week #'])===String(x)).length),borderColor:RC[i],backgroundColor:'transparent',tension:.35,pointRadius:4,pointBackgroundColor:RC[i],borderWidth:2})));
+  buildLine('cTrend',w.map(x=>wkLabel(x)),REPS.filter(rep=>rows.some(r=>r['Sales Rep']===rep)).map((rep,i)=>({label:rep.split(' ')[0],data:w.map(x=>rows.filter(r=>r['Sales Rep']===rep&&String(r['Week #'])===String(x)).length),borderColor:RC[i],backgroundColor:'transparent',tension:.35,pointRadius:4,pointBackgroundColor:RC[i],borderWidth:2})));
   buildBar('cValRep',rL(rows),[{label:'Value Sold',data:rL(rows).map(rep=>rows.filter(r=>r['Sales Rep']===rep&&r['Status']==='Approved').reduce((s,r)=>s+cleanVal(r['Estimate Value']),0)),backgroundColor:RB,borderColor:RC,borderWidth:1,borderRadius:5}],{money:true});
   buildDonut('cStatus',['Approved','Estimate Sent','Lost'],[s.approved,s.sent,s.lost],['rgba(118,188,33,.85)','rgba(214,137,16,.85)','rgba(192,57,43,.85)'],['#76BC21','#D68910','#C0392B']);
 }
@@ -377,8 +442,8 @@ function renderWeekly(rows){
     {label:'Approved',data:rD(rows,'Approved'),backgroundColor:'rgba(118,188,33,.8)',borderColor:'#76BC21',borderWidth:1},
     {label:'Lost',data:rD(rows,'Lost'),backgroundColor:'rgba(192,57,43,.75)',borderColor:'#C0392B',borderWidth:1},
   ]);
-  buildGroup('wRepWk',w.map(x=>'W'+x),REPS.filter(rep=>allRows.some(r=>r['Sales Rep']===rep)).map((rep,i)=>({label:rep.split(' ')[0],data:w.map(x=>rows.filter(r=>r['Sales Rep']===rep&&String(r['Week #'])===String(x)).length),backgroundColor:RB[i],borderColor:RC[i],borderWidth:1,borderRadius:3})));
-  buildStacked('wTotals',w.map(x=>'Week '+x),[
+  buildGroup('wRepWk',w.map(x=>wkLabel(x)),REPS.filter(rep=>allRows.some(r=>r['Sales Rep']===rep)).map((rep,i)=>({label:rep.split(' ')[0],data:w.map(x=>rows.filter(r=>r['Sales Rep']===rep&&String(r['Week #'])===String(x)).length),backgroundColor:RB[i],borderColor:RC[i],borderWidth:1,borderRadius:3})));
+  buildStacked('wTotals',w.map(x=>wkLabel(x)),[
     {label:'Estimate Sent',data:w.map(x=>allRows.filter(r=>String(r['Week #'])===String(x)&&r['Status']==='Estimate Sent').length),backgroundColor:'rgba(214,137,16,.7)',borderColor:'#D68910',borderWidth:1},
     {label:'Approved',data:w.map(x=>allRows.filter(r=>String(r['Week #'])===String(x)&&r['Status']==='Approved').length),backgroundColor:'rgba(118,188,33,.75)',borderColor:'#76BC21',borderWidth:1},
     {label:'Lost',data:w.map(x=>allRows.filter(r=>String(r['Week #'])===String(x)&&r['Status']==='Lost').length),backgroundColor:'rgba(192,57,43,.65)',borderColor:'#C0392B',borderWidth:1},
@@ -407,8 +472,8 @@ function renderByRep(rows){
   buildBar('rConv',rL(rows),[{label:'Conv %',data:cd,backgroundColor:cd.map(v=>v>=80?'rgba(118,188,33,.8)':v>=60?'rgba(214,137,16,.75)':'rgba(192,57,43,.75)'),borderColor:cd.map(v=>v>=80?'#76BC21':v>=60?'#D68910':'#C0392B'),borderWidth:1,borderRadius:6}],{pct:true});
   const td=rL(rows).map(rep=>{const rr=rows.filter(r=>r['Sales Rep']===rep&&r['Status']==='Approved');return rr.length?Math.round(rr.reduce((s,r)=>s+cleanVal(r['Estimate Value']),0)/rr.length):0;});
   buildBar('rTicket',rL(rows),[{label:'Avg Ticket',data:td,backgroundColor:RB,borderColor:RC,borderWidth:1,borderRadius:6}],{money:true});
-  buildLine('rWkLine',w.map(x=>'Week '+x),REPS.filter(rep=>rows.some(r=>r['Sales Rep']===rep)).map((rep,i)=>({label:rep.split(' ')[0],data:w.map(x=>rows.filter(r=>r['Sales Rep']===rep&&String(r['Week #'])===String(x)).length),borderColor:RC[i],backgroundColor:'transparent',tension:.3,pointRadius:5,pointBackgroundColor:RC[i],borderWidth:2})));
-  buildLine('rWkVal',w.map(x=>'Week '+x),REPS.filter(rep=>rows.some(r=>r['Sales Rep']===rep)).map((rep,i)=>({label:rep.split(' ')[0],data:w.map(x=>rows.filter(r=>r['Sales Rep']===rep&&String(r['Week #'])===String(x)&&r['Status']==='Approved').reduce((s,r)=>s+cleanVal(r['Estimate Value']),0)),borderColor:RC[i],backgroundColor:RB[i].replace('.7','.1'),fill:true,tension:.3,pointRadius:4,pointBackgroundColor:RC[i],borderWidth:2})),{money:true});
+  buildLine('rWkLine',w.map(x=>wkLabel(x)),REPS.filter(rep=>rows.some(r=>r['Sales Rep']===rep)).map((rep,i)=>({label:rep.split(' ')[0],data:w.map(x=>rows.filter(r=>r['Sales Rep']===rep&&String(r['Week #'])===String(x)).length),borderColor:RC[i],backgroundColor:'transparent',tension:.3,pointRadius:5,pointBackgroundColor:RC[i],borderWidth:2})));
+  buildLine('rWkVal',w.map(x=>wkLabel(x)),REPS.filter(rep=>rows.some(r=>r['Sales Rep']===rep)).map((rep,i)=>({label:rep.split(' ')[0],data:w.map(x=>rows.filter(r=>r['Sales Rep']===rep&&String(r['Week #'])===String(x)&&r['Status']==='Approved').reduce((s,r)=>s+cleanVal(r['Estimate Value']),0)),borderColor:RC[i],backgroundColor:RB[i].replace('.7','.1'),fill:true,tension:.3,pointRadius:4,pointBackgroundColor:RC[i],borderWidth:2})),{money:true});
 }
 
 // ── PRODUCTS ──────────────────────────────────────────────────────────────────
