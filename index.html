@@ -321,52 +321,64 @@ function weekLabel(key){
 // ── CLEAN VALUES ──────────────────────────────────────────────────────────────
 function cleanVal(v){
   if(!v||v===''||v==='-'||v===null||v===undefined)return 0;
-  let s=String(v).replace(/[$€£\s]/g,'').trim();
+  // Remove currency symbols, spaces, % signs
+  let s=String(v).replace(/[$€£%\s]/g,'').trim();
   if(!s)return 0;
 
-  // Detect format by counting separators
-  const dots  = (s.match(/\./g)||[]).length;
-  const commas= (s.match(/,/g)||[]).length;
+  const dots   = (s.match(/\./g)||[]).length;
+  const commas = (s.match(/,/g)||[]).length;
 
-  if(dots===1 && commas===0){
-    // Could be 672.50 (US decimal) or 1.500 (EU thousand)
-    const afterDot = s.split('.')[1];
-    if(afterDot && afterDot.length===3 && !s.includes(',')) {
-      // Likely EU thousand separator: 1.500 → 1500
-      s = s.replace(/\./g,'');
-    }
-    // else US decimal: 672.50 → keep as is
-  } else if(commas===1 && dots===0){
-    // Could be 672,50 (EU decimal) or 1,500 (US thousand)
-    const afterComma = s.split(',')[1];
-    if(afterComma && afterComma.length===2){
-      // EU decimal: 672,50 → 672.50
+  if(dots===0 && commas===0){
+    // Plain number: 1500
+  } else if(dots===0 && commas===1){
+    // Only a comma — check digits after
+    const after = s.split(',')[1]||'';
+    if(after.length<=2){
+      // EU decimal: 672,50 or 672,5 → 672.50
       s = s.replace(',','.');
     } else {
       // US thousand: 1,500 → 1500
       s = s.replace(',','');
     }
-  } else if(dots>=1 && commas>=1){
-    // Mixed: figure out which is decimal
-    const lastDot  = s.lastIndexOf('.');
-    const lastComma= s.lastIndexOf(',');
+  } else if(dots===1 && commas===0){
+    // Only a dot — check digits after
+    const after = s.split('.')[1]||'';
+    if(after.length===3){
+      // EU thousand: 1.500 → 1500
+      s = s.replace('.','');
+    }
+    // else US decimal: 672.50 → keep
+  } else if(commas===1 && dots>=1){
+    const lastComma = s.lastIndexOf(',');
+    const lastDot   = s.lastIndexOf('.');
     if(lastComma > lastDot){
-      // EU: 1.234,56 → remove dots, replace comma with dot
+      // EU format: 1.234,56
       s = s.replace(/\./g,'').replace(',','.');
     } else {
-      // US: 1,234.56 → remove commas
+      // US format: 1,234.56
       s = s.replace(/,/g,'');
     }
+  } else if(dots===1 && commas>1){
+    // US: 1,234,567.89
+    s = s.replace(/,/g,'');
+  } else if(commas===1 && dots>1){
+    // EU: 1.234.567,89
+    s = s.replace(/\./g,'').replace(',','.');
   } else if(dots>1){
-    // Multiple dots = EU thousands: 1.234.567 → remove dots
     s = s.replace(/\./g,'');
   } else if(commas>1){
-    // Multiple commas = US thousands: 1,234,567 → remove commas
     s = s.replace(/,/g,'');
   }
 
   const n = parseFloat(s);
   return isNaN(n)?0:n;
+}
+
+// Final Value = what client actually paid (Final Value col if filled, else Estimate Value)
+function finalVal(r){
+  const fv = cleanVal(r['Final Value']);
+  const ev = cleanVal(r['Estimate Value']);
+  return (fv > 0) ? fv : ev;
 }
 
 // ── SYNC ──────────────────────────────────────────────────────────────────────
@@ -599,7 +611,7 @@ function renderProducts(rows){
     ${kpi('Most Quoted',top.name,'green',top.count+' estimates')}
     ${kpi('Top by Revenue',topV.name,'blue',fmt(topV.valS)+' sold')}
     ${kpi('Total Quoted',fmt(rows.reduce((s,r)=>s+cleanVal(r['Estimate Value']),0)),'','','','font-size:20px')}
-    ${kpi('Total Sold',fmt(rows.filter(r=>r['Status']==='Approved').reduce((s,r)=>s+cleanVal(r['Estimate Value']),0)),'green','','','font-size:20px')}
+    ${kpi('Total Sold',fmt(rows.filter(r=>r['Status']==='Approved').reduce((s,r)=>s+finalVal(r),0)),'green','','','font-size:20px')}
   </div>
   <div class="charts-row col2">
     <div class="chart-card"><div class="chart-header"><div class="chart-title">Estimates by Product Line</div></div><div class="chart-wrap h220"><canvas id="pProd"></canvas></div></div>
@@ -737,7 +749,7 @@ function stats(rows){
     sent=rows.filter(r=>r['Status']==='Estimate Sent').length,lost=rows.filter(r=>r['Status']==='Lost').length,
     conv=total?Math.round(approved/total*100):0,
     valQ=rows.reduce((s,r)=>s+cleanVal(r['Estimate Value']),0),
-    valS=rows.filter(r=>r['Status']==='Approved').reduce((s,r)=>s+cleanVal(r['Estimate Value']),0),
+    valS=rows.filter(r=>r['Status']==='Approved').reduce((s,r)=>s+finalVal(r),0),
     valL=rows.filter(r=>r['Status']==='Lost').reduce((s,r)=>s+cleanVal(r['Value Lost']),0);
   return{total,approved,sent,lost,conv,valQ,valS,valL};
 }
@@ -751,7 +763,7 @@ function repTable(rows,bodyId){
     const app=rr.filter(r=>r['Status']==='Approved').length,st=rr.filter(r=>r['Status']==='Estimate Sent').length,lo=rr.filter(r=>r['Status']==='Lost').length;
     const conv=rr.length?Math.round(app/rr.length*100):0;
     const vq=rr.reduce((s,r)=>s+cleanVal(r['Estimate Value']),0),
-      vs=rr.filter(r=>r['Status']==='Approved').reduce((s,r)=>s+cleanVal(r['Estimate Value']),0),
+      vs=rr.filter(r=>r['Status']==='Approved').reduce((s,r)=>s+finalVal(r),0),
       vl=rr.filter(r=>r['Status']==='Lost').reduce((s,r)=>s+cleanVal(r['Value Lost']),0);
     const avgT=app?Math.round(vs/app):0;
     ts+=st;ta+=app;tl+=lo;tq+=vq;ts2+=vs;tvl+=vl;tot+=rr.length;
