@@ -292,11 +292,45 @@ let allRows=[],activeView='cumulative',charts={};
 
 // ── DATE UTILS ────────────────────────────────────────────────────────────────
 function parseDate(str){
-  if(!str)return null;
-  const p=str.trim().split('/');
-  if(p.length<3)return null;
-  const d=new Date(+p[2],+p[0]-1,+p[1]);
-  return isNaN(d.getTime())?null:d;
+  if(!str||str.trim()==='')return null;
+  const s=str.trim();
+
+  // Try MM/DD/YYYY (US format — expected)
+  let m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if(m){
+    const d=new Date(+m[3],+m[1]-1,+m[2]);
+    if(!isNaN(d.getTime()))return d;
+  }
+
+  // Try DD/MM/YYYY (EU/Colombia format)
+  m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if(m){
+    // Disambiguate: if first part > 12 it must be day
+    if(+m[1]>12){
+      const d=new Date(+m[3],+m[2]-1,+m[1]);
+      if(!isNaN(d.getTime()))return d;
+    }
+  }
+
+  // Try YYYY-MM-DD (ISO)
+  m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(m){
+    const d=new Date(+m[1],+m[2]-1,+m[3]);
+    if(!isNaN(d.getTime()))return d;
+  }
+
+  // Try DD-MM-YYYY
+  m=s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if(m){
+    const d=new Date(+m[3],+m[2]-1,+m[1]);
+    if(!isNaN(d.getTime()))return d;
+  }
+
+  // Try native Date parse as last resort
+  const native=new Date(s);
+  if(!isNaN(native.getTime()))return native;
+
+  return null;
 }
 // Get Monday of the week containing date d
 function weekStart(d){
