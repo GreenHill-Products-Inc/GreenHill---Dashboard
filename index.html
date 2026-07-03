@@ -295,38 +295,36 @@ function parseDate(str){
   if(!str||str.trim()==='')return null;
   const s=str.trim();
 
-  // Try MM/DD/YYYY (US format — expected)
-  let m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if(m){
-    const d=new Date(+m[3],+m[1]-1,+m[2]);
-    if(!isNaN(d.getTime()))return d;
-  }
+  // Helper: fix 2-digit year → 4-digit (26 → 2026)
+  function fixYear(y){ const n=+y; return n<100?(n<50?2000+n:1900+n):n; }
 
-  // Try DD/MM/YYYY (EU/Colombia format)
-  m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  let m;
+
+  // M/D/YY or M/D/YYYY (Google Sheets short format: 6/1/26)
+  m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
   if(m){
-    // Disambiguate: if first part > 12 it must be day
-    if(+m[1]>12){
-      const d=new Date(+m[3],+m[2]-1,+m[1]);
+    const mo=+m[1], dy=+m[2], yr=fixYear(m[3]);
+    if(mo>=1&&mo<=12&&dy>=1&&dy<=31){
+      const d=new Date(yr,mo-1,dy);
       if(!isNaN(d.getTime()))return d;
     }
   }
 
-  // Try YYYY-MM-DD (ISO)
+  // YYYY-MM-DD (ISO)
   m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if(m){
     const d=new Date(+m[1],+m[2]-1,+m[3]);
     if(!isNaN(d.getTime()))return d;
   }
 
-  // Try DD-MM-YYYY
+  // DD-MM-YYYY
   m=s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
   if(m){
     const d=new Date(+m[3],+m[2]-1,+m[1]);
     if(!isNaN(d.getTime()))return d;
   }
 
-  // Try native Date parse as last resort
+  // Native parse as last resort
   const native=new Date(s);
   if(!isNaN(native.getTime()))return native;
 
