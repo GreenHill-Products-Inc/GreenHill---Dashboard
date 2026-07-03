@@ -642,23 +642,55 @@ function renderProducts(rows){
 
 // ── INSIGHTS ──────────────────────────────────────────────────────────────────
 function renderInsights(rows){
-  const approved=rows.filter(r=>r['Status']==='Approved');
-  const lost=rows.filter(r=>r['Status']==='Lost');
-  const tickets=REPS.map(rep=>{const rr=approved.filter(r=>r['Sales Rep']===rep);return{rep,avg:rr.length?Math.round(rr.reduce((s,r)=>s+cleanVal(r['Estimate Value']),0)/rr.length):0,count:rr.length};}).filter(x=>x.count>0).sort((a,b)=>b.avg-a.avg);
-  const closeTimes=approved.filter(r=>r['Close Date']&&r['Date']).map(r=>{const d1=parseDate(r['Date']),d2=parseDate(r['Close Date']);const diff=d1&&d2?Math.round((d2-d1)/(1000*60*60*24)):null;return{rep:r['Sales Rep'],days:diff!==null&&diff>=0?diff:null};}).filter(r=>r.days!==null);
+  const approved = rows.filter(r=>r['Status']==='Approved');
+  const lost     = rows.filter(r=>r['Status']==='Lost');
+
+  // Avg ticket uses Final Value (actual amount paid)
+  const tickets = REPS.map(rep=>{
+    const rr=approved.filter(r=>r['Sales Rep']===rep);
+    return{rep, avg:rr.length?Math.round(rr.reduce((s,r)=>s+finalVal(r),0)/rr.length):0, count:rr.length};
+  }).filter(x=>x.count>0).sort((a,b)=>b.avg-a.avg);
+
+  // Close times
+  const closeTimes=approved.filter(r=>r['Close Date']&&r['Date']).map(r=>{
+    const d1=parseDate(r['Date']),d2=parseDate(r['Close Date']);
+    const diff=d1&&d2?Math.round((d2-d1)/(1000*60*60*24)):null;
+    return{rep:r['Sales Rep'],days:diff!==null&&diff>=0?diff:null};
+  }).filter(r=>r.days!==null);
   const avgClose=closeTimes.length?Math.round(closeTimes.reduce((s,r)=>s+r.days,0)/closeTimes.length):null;
-  const closeByRep=REPS.map(rep=>{const rr=closeTimes.filter(r=>r.rep===rep);return{rep,avg:rr.length?Math.round(rr.reduce((s,r)=>s+r.days,0)/rr.length):null,count:rr.length};}).filter(x=>x.count>0);
-  const lostVal=lost.reduce((s,r)=>s+calcLost(r),0);
-  const lostByRep=REPS.map(rep=>({rep,count:lost.filter(r=>r['Sales Rep']===rep).length,val:lost.filter(r=>r['Sales Rep']===rep).reduce((s,r)=>s+calcLost(r),0)})).filter(x=>x.count>0);
-  const lossRate=rows.length?Math.round(lost.length/rows.length*100):0;
-  const avgAll=approved.length?Math.round(approved.reduce((s,r)=>s+cleanVal(r['Estimate Value']),0)/approved.length):0;
+  const closeByRep=REPS.map(rep=>{
+    const rr=closeTimes.filter(r=>r.rep===rep);
+    return{rep,avg:rr.length?Math.round(rr.reduce((s,r)=>s+r.days,0)/rr.length):null,count:rr.length};
+  }).filter(x=>x.count>0);
+
+  // Lost deals
+  const lostVal    = lost.reduce((s,r)=>s+calcLost(r),0);
+  const lostByRep  = REPS.map(rep=>({
+    rep, count:lost.filter(r=>r['Sales Rep']===rep).length,
+    val:lost.filter(r=>r['Sales Rep']===rep).reduce((s,r)=>s+calcLost(r),0)
+  })).filter(x=>x.count>0);
+  const lossRate   = rows.length?Math.round(lost.length/rows.length*100):0;
+
+  // Revenue leakage = discounts on approved deals (Estimate Value > Final Value)
+  const leakage    = approved.filter(r=>cleanVal(r['Final Value'])>0 && cleanVal(r['Final Value'])<cleanVal(r['Estimate Value']));
+  const leakTotal  = leakage.reduce((s,r)=>s+(cleanVal(r['Estimate Value'])-cleanVal(r['Final Value'])),0);
+  const leakByRep  = REPS.map(rep=>({
+    rep,
+    count: leakage.filter(r=>r['Sales Rep']===rep).length,
+    val:   leakage.filter(r=>r['Sales Rep']===rep).reduce((s,r)=>s+(cleanVal(r['Estimate Value'])-cleanVal(r['Final Value'])),0)
+  })).filter(x=>x.count>0);
+
+  const avgAll = approved.length?Math.round(approved.reduce((s,r)=>s+finalVal(r),0)/approved.length):0;
+
   set(`
-  <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr)">
-    ${kpi('Avg Ticket (Approved)',fmt(avgAll),'green','Across all approved')}
+  <div class="kpi-grid">
+    ${kpi('Avg Ticket (Approved)',fmt(avgAll),'green','Based on final amount paid')}
     ${kpi('Avg Close Time',avgClose!==null?avgClose+' days':'No data','blue',avgClose!==null?'Estimate to approval':'Fill Close Date to track')}
     ${kpi('Lost Deals',lost.length,'red',fmt(lostVal)+' in value')}
     ${kpi('Loss Rate',lossRate+'%',lossRate>20?'red':lossRate>10?'amber':'green',lost.length+' lost of '+rows.length+' total')}
+    ${kpi('Revenue Leakage',fmt(leakTotal),'amber',leakage.length+' deals with discounts')}
   </div>
+
   <div class="insight-grid">
     <div class="insight-card">
       <div class="insight-title">💰 Avg Ticket by Rep</div>
@@ -673,16 +705,73 @@ function renderInsights(rows){
       ${lost.length?lostByRep.map(r=>`<div class="insight-row"><span class="label">${r.rep.split(' ')[0]}</span><span class="val red">${r.count} lost · ${fmt(r.val)}</span></div>`).join('')+'<div class="insight-row" style="margin-top:4px;border-top:1px solid var(--lgray)"><span class="label" style="font-weight:700">Total</span><span class="val red">'+fmt(lostVal)+'</span></div>':'<div class="insight-row"><span class="label" style="color:var(--mid)">No lost deals 🎉</span></div>'}
     </div>
   </div>
+
+  <div class="insight-grid" style="margin-bottom:12px">
+    <div class="insight-card" style="grid-column:1/-1;border-left:3px solid var(--amber)">
+      <div class="insight-title">📉 Revenue Leakage — Discounts on Approved Deals</div>
+      ${leakage.length?`
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">
+          ${leakByRep.map(r=>`
+            <div style="background:var(--amber-bg);border-radius:8px;padding:12px">
+              <div style="font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">${r.rep.split(' ')[0]}</div>
+              <div style="font-size:20px;font-weight:900;color:var(--amber)">${fmt(r.val)}</div>
+              <div style="font-size:10px;color:var(--mid);margin-top:4px">${r.count} deal${r.count>1?'s':''} with discount</div>
+            </div>`).join('')}
+          <div style="background:var(--red-bg);border-radius:8px;padding:12px;border:1px solid rgba(192,57,43,.2)">
+            <div style="font-size:10px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Total Leakage</div>
+            <div style="font-size:20px;font-weight:900;color:var(--red)">${fmt(leakTotal)}</div>
+            <div style="font-size:10px;color:var(--mid);margin-top:4px">${leakage.length} discounted deal${leakage.length>1?'s':''}</div>
+          </div>
+        </div>
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr>
+            <th style="text-align:left;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--mid);background:var(--panel2);padding:8px 12px;border-bottom:1px solid var(--lgray)">Date</th>
+            <th style="text-align:left;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--mid);background:var(--panel2);padding:8px 12px;border-bottom:1px solid var(--lgray)">Rep</th>
+            <th style="text-align:left;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--mid);background:var(--panel2);padding:8px 12px;border-bottom:1px solid var(--lgray)">Client</th>
+            <th style="text-align:right;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--mid);background:var(--panel2);padding:8px 12px;border-bottom:1px solid var(--lgray)">Quoted</th>
+            <th style="text-align:right;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--mid);background:var(--panel2);padding:8px 12px;border-bottom:1px solid var(--lgray)">Final Paid</th>
+            <th style="text-align:right;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--mid);background:var(--panel2);padding:8px 12px;border-bottom:1px solid var(--lgray)">Discount</th>
+            <th style="text-align:right;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--mid);background:var(--panel2);padding:8px 12px;border-bottom:1px solid var(--lgray)">Discount %</th>
+          </tr></thead>
+          <tbody>${leakage.map((r,i)=>{
+            const ev=cleanVal(r['Estimate Value']),fv=cleanVal(r['Final Value']),disc=ev-fv,pct=Math.round(disc/ev*100);
+            return`<tr style="${i%2?'background:var(--panel2)':''}">
+              <td style="padding:10px 12px;font-size:12px">${r['Date']||''}</td>
+              <td style="padding:10px 12px;font-size:12px;font-weight:700">${(r['Sales Rep']||'').split(' ')[0]}</td>
+              <td style="padding:10px 12px;font-size:12px">${r['Client / Builder']||''}</td>
+              <td style="padding:10px 12px;font-size:12px;text-align:right">${fmt(ev)}</td>
+              <td style="padding:10px 12px;font-size:12px;text-align:right;color:var(--deep);font-weight:600">${fmt(fv)}</td>
+              <td style="padding:10px 12px;font-size:12px;text-align:right;color:var(--amber);font-weight:700">${fmt(disc)}</td>
+              <td style="padding:10px 12px;font-size:12px;text-align:right"><span style="background:var(--amber-bg);color:var(--amber);padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700">${pct}%</span></td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>`
+      :'<div style="padding:20px;text-align:center;color:var(--mid);font-size:13px">No discounts given this period — full price on all approved deals ✅</div>'}
+    </div>
+  </div>
+
   <div class="charts-row col2">
     <div class="chart-card"><div class="chart-header"><div class="chart-title">Avg Ticket — Rep Comparison</div></div><div class="chart-wrap h200"><canvas id="iTicket"></canvas></div></div>
-    <div class="chart-card"><div class="chart-header"><div class="chart-title">Lost Value by Rep</div></div><div class="chart-wrap h200"><canvas id="iLost"></canvas></div></div>
+    <div class="chart-card"><div class="chart-header"><div class="chart-title">Revenue Leakage by Rep</div></div><div class="chart-wrap h200"><canvas id="iLeak"></canvas></div></div>
   </div>
+
   <div class="table-card"><div class="table-header"><div class="table-title">Lost Deals — Detail</div></div>
-  ${lost.length?`<table><thead><tr><th>Date</th><th>Rep</th><th>Client</th><th>Subdivision</th><th>Type</th><th>Value Lost</th><th>Notes</th></tr></thead><tbody>${lost.map((r,i)=>`<tr style="${i%2?'background:var(--panel2)':''}"><td>${r['Date']||''}</td><td class="rep-bold" style="color:var(--red)">${(r['Sales Rep']||'').split(' ')[0]}</td><td>${r['Client / Builder']||''}</td><td>${r['Subdivision']||'—'}</td><td>${r['Customer Type']||''}</td><td style="color:var(--red);font-weight:700">${fmt(calcLost(r))}</td><td style="font-size:11px;color:var(--mid)">${r['Notes']||'—'}</td></tr>`).join('')}</tbody></table>`:'<p style="padding:24px;text-align:center;color:var(--mid);font-size:13px">No lost deals this period 🎉</p>'}
+  ${lost.length?`<table><thead><tr><th>Date</th><th>Rep</th><th>Client</th><th>Subdivision</th><th>Type</th><th>Value Lost</th><th>Notes</th></tr></thead>
+  <tbody>${lost.map((r,i)=>`<tr style="${i%2?'background:var(--panel2)':''}">
+    <td style="padding:11px 14px;font-size:12px">${r['Date']||''}</td>
+    <td style="padding:11px 14px;font-size:12px;font-weight:700;color:var(--red)">${(r['Sales Rep']||'').split(' ')[0]}</td>
+    <td style="padding:11px 14px;font-size:12px">${r['Client / Builder']||''}</td>
+    <td style="padding:11px 14px;font-size:12px">${r['Subdivision']||'—'}</td>
+    <td style="padding:11px 14px;font-size:12px">${r['Customer Type']||''}</td>
+    <td style="padding:11px 14px;font-size:12px;text-align:right;color:var(--red);font-weight:700">${fmt(calcLost(r))}</td>
+    <td style="padding:11px 14px;font-size:11px;color:var(--mid)">${r['Notes']||'—'}</td>
+  </tr>`).join('')}</tbody></table>`
+  :'<p style="padding:24px;text-align:center;color:var(--mid);font-size:13px">No lost deals this period 🎉</p>'}
   </div>`);
+
   buildBarH('iTicket',tickets.map(t=>t.rep.split(' ')[0]),[{label:'Avg Ticket',data:tickets.map(t=>t.avg),backgroundColor:RB,borderWidth:0,borderRadius:5}],{money:true});
-  const lr=lostByRep.map(r=>r.rep.split(' ')[0]);
-  buildBarH('iLost',lr.length?lr:['No losses'],[{label:'Lost',data:lr.length?lostByRep.map(r=>r.val):[0],backgroundColor:'rgba(192,57,43,.8)',borderWidth:0,borderRadius:5}],{money:true});
+  const lr=leakByRep.map(r=>r.rep.split(' ')[0]);
+  buildBarH('iLeak',lr.length?lr:['No leakage'],[{label:'Leakage',data:lr.length?leakByRep.map(r=>r.val):[0],backgroundColor:'rgba(214,137,16,.8)',borderWidth:0,borderRadius:5}],{money:true});
 }
 
 // ── PIPELINE ──────────────────────────────────────────────────────────────────
