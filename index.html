@@ -381,6 +381,18 @@ function finalVal(r){
   return (fv > 0) ? fv : ev;
 }
 
+// Value Lost — calculated automatically from the data, never from the sheet column
+// Lost deal   → full estimate value
+// Approved with discount (Final Value < Estimate Value) → difference
+// Approved no discount → 0
+function calcLost(r){
+  const ev = cleanVal(r['Estimate Value']);
+  const fv = cleanVal(r['Final Value']);
+  if(r['Status']==='Lost') return ev;
+  if(r['Status']==='Approved' && fv > 0 && fv < ev) return ev - fv;
+  return 0;
+}
+
 // ── SYNC ──────────────────────────────────────────────────────────────────────
 async function syncData(){
   const btn=document.getElementById('syncBtn'),st=document.getElementById('syncStatus');
@@ -636,8 +648,8 @@ function renderInsights(rows){
   const closeTimes=approved.filter(r=>r['Close Date']&&r['Date']).map(r=>{const d1=parseDate(r['Date']),d2=parseDate(r['Close Date']);const diff=d1&&d2?Math.round((d2-d1)/(1000*60*60*24)):null;return{rep:r['Sales Rep'],days:diff!==null&&diff>=0?diff:null};}).filter(r=>r.days!==null);
   const avgClose=closeTimes.length?Math.round(closeTimes.reduce((s,r)=>s+r.days,0)/closeTimes.length):null;
   const closeByRep=REPS.map(rep=>{const rr=closeTimes.filter(r=>r.rep===rep);return{rep,avg:rr.length?Math.round(rr.reduce((s,r)=>s+r.days,0)/rr.length):null,count:rr.length};}).filter(x=>x.count>0);
-  const lostVal=lost.reduce((s,r)=>s+cleanVal(r['Value Lost']||r['Estimate Value']),0);
-  const lostByRep=REPS.map(rep=>({rep,count:lost.filter(r=>r['Sales Rep']===rep).length,val:lost.filter(r=>r['Sales Rep']===rep).reduce((s,r)=>s+cleanVal(r['Value Lost']||r['Estimate Value']),0)})).filter(x=>x.count>0);
+  const lostVal=lost.reduce((s,r)=>s+calcLost(r),0);
+  const lostByRep=REPS.map(rep=>({rep,count:lost.filter(r=>r['Sales Rep']===rep).length,val:lost.filter(r=>r['Sales Rep']===rep).reduce((s,r)=>s+calcLost(r),0)})).filter(x=>x.count>0);
   const lossRate=rows.length?Math.round(lost.length/rows.length*100):0;
   const avgAll=approved.length?Math.round(approved.reduce((s,r)=>s+cleanVal(r['Estimate Value']),0)/approved.length):0;
   set(`
@@ -666,7 +678,7 @@ function renderInsights(rows){
     <div class="chart-card"><div class="chart-header"><div class="chart-title">Lost Value by Rep</div></div><div class="chart-wrap h200"><canvas id="iLost"></canvas></div></div>
   </div>
   <div class="table-card"><div class="table-header"><div class="table-title">Lost Deals — Detail</div></div>
-  ${lost.length?`<table><thead><tr><th>Date</th><th>Rep</th><th>Client</th><th>Subdivision</th><th>Type</th><th>Value Lost</th><th>Notes</th></tr></thead><tbody>${lost.map((r,i)=>`<tr style="${i%2?'background:var(--panel2)':''}"><td>${r['Date']||''}</td><td class="rep-bold" style="color:var(--red)">${(r['Sales Rep']||'').split(' ')[0]}</td><td>${r['Client / Builder']||''}</td><td>${r['Subdivision']||'—'}</td><td>${r['Customer Type']||''}</td><td style="color:var(--red);font-weight:700">${fmt(cleanVal(r['Value Lost']||r['Estimate Value']))}</td><td style="font-size:11px;color:var(--mid)">${r['Notes']||'—'}</td></tr>`).join('')}</tbody></table>`:'<p style="padding:24px;text-align:center;color:var(--mid);font-size:13px">No lost deals this period 🎉</p>'}
+  ${lost.length?`<table><thead><tr><th>Date</th><th>Rep</th><th>Client</th><th>Subdivision</th><th>Type</th><th>Value Lost</th><th>Notes</th></tr></thead><tbody>${lost.map((r,i)=>`<tr style="${i%2?'background:var(--panel2)':''}"><td>${r['Date']||''}</td><td class="rep-bold" style="color:var(--red)">${(r['Sales Rep']||'').split(' ')[0]}</td><td>${r['Client / Builder']||''}</td><td>${r['Subdivision']||'—'}</td><td>${r['Customer Type']||''}</td><td style="color:var(--red);font-weight:700">${fmt(calcLost(r))}</td><td style="font-size:11px;color:var(--mid)">${r['Notes']||'—'}</td></tr>`).join('')}</tbody></table>`:'<p style="padding:24px;text-align:center;color:var(--mid);font-size:13px">No lost deals this period 🎉</p>'}
   </div>`);
   buildBarH('iTicket',tickets.map(t=>t.rep.split(' ')[0]),[{label:'Avg Ticket',data:tickets.map(t=>t.avg),backgroundColor:RB,borderWidth:0,borderRadius:5}],{money:true});
   const lr=lostByRep.map(r=>r.rep.split(' ')[0]);
@@ -750,7 +762,7 @@ function stats(rows){
     conv=total?Math.round(approved/total*100):0,
     valQ=rows.reduce((s,r)=>s+cleanVal(r['Estimate Value']),0),
     valS=rows.filter(r=>r['Status']==='Approved').reduce((s,r)=>s+finalVal(r),0),
-    valL=rows.filter(r=>r['Status']==='Lost').reduce((s,r)=>s+cleanVal(r['Value Lost']),0);
+    valL=rows.reduce((s,r)=>s+calcLost(r),0);
   return{total,approved,sent,lost,conv,valQ,valS,valL};
 }
 function rL(rows){return REPS.filter(r=>rows.some(x=>x['Sales Rep']===r));}
@@ -764,7 +776,7 @@ function repTable(rows,bodyId){
     const conv=rr.length?Math.round(app/rr.length*100):0;
     const vq=rr.reduce((s,r)=>s+cleanVal(r['Estimate Value']),0),
       vs=rr.filter(r=>r['Status']==='Approved').reduce((s,r)=>s+finalVal(r),0),
-      vl=rr.filter(r=>r['Status']==='Lost').reduce((s,r)=>s+cleanVal(r['Value Lost']),0);
+      vl=rr.reduce((s,r)=>s+calcLost(r),0);
     const avgT=app?Math.round(vs/app):0;
     ts+=st;ta+=app;tl+=lo;tq+=vq;ts2+=vs;tvl+=vl;tot+=rr.length;
     const cl=conv>=80?'hi':conv>=60?'md':'lo';
