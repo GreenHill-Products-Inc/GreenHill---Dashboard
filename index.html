@@ -225,6 +225,12 @@ td:not(:first-child){text-align:right;font-variant-numeric:tabular-nums}
       <div class="nav-item" onclick="setView('pipeline',this)">
         <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Pipeline
       </div>
+      <div class="nav-item" onclick="setView('leaderboard',this)">
+        <svg viewBox="0 0 24 24"><polyline points="18 20 18 10"/><polyline points="12 20 12 4"/><polyline points="6 20 6 14"/></svg>Leaderboard
+      </div>
+      <div class="nav-item" onclick="setView('clients',this)">
+        <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Clients
+      </div>
       <div class="nav-divider"></div>
       <div class="nav-label">Filter</div>
       <span class="filter-label">Sales Rep</span>
@@ -259,12 +265,21 @@ td:not(:first-child){text-align:right;font-variant-numeric:tabular-nums}
       </div>
       <div class="topbar-right">
         <div id="syncChip" style="display:none"></div>
+        <select id="filterClient" class="top-select" onchange="render()" style="display:none">
+          <option value="all">All Clients</option>
+        </select>
         <select id="filterMonth" class="top-select" onchange="render()" style="display:none">
           <option value="all">All Months</option>
         </select>
         <select id="filterWeek" class="top-select" onchange="render()" style="display:none">
           <option value="all">All Weeks</option>
         </select>
+        <button onclick="printReport('weekly')" id="btnPrintWeekly" style="display:none;padding:6px 12px;border:1px solid var(--lgray);border-radius:6px;font-size:11px;font-weight:600;color:var(--deep);background:var(--mint);cursor:pointer;font-family:inherit;">
+          🖨 Weekly PDF
+        </button>
+        <button onclick="printReport('monthly')" id="btnPrintMonthly" style="display:none;padding:6px 12px;border:1px solid var(--lgray);border-radius:6px;font-size:11px;font-weight:600;color:var(--deep);background:var(--mint);cursor:pointer;font-family:inherit;">
+          🖨 Monthly PDF
+        </button>
       </div>
     </div>
     <div class="period-tabs" id="periodTabsWrap" style="display:none">
@@ -463,24 +478,23 @@ async function syncData(){
 
 // ── FILTERS ───────────────────────────────────────────────────────────────────
 function populateFilters(){
-  // Real calendar weeks
   const wkKeys=[...new Set(allRows.map(r=>r._wk).filter(Boolean))].sort();
   const wsel=document.getElementById('filterWeek');
   wsel.innerHTML='<option value="all">All Weeks</option>';
-  wkKeys.forEach(k=>{
-    const o=document.createElement('option');
-    o.value=k;o.textContent=weekLabel(k);
-    wsel.appendChild(o);
-  });
-  // Months
+  wkKeys.forEach(k=>{const o=document.createElement('option');o.value=k;o.textContent=weekLabel(k);wsel.appendChild(o);});
+
   const moMap={};
   allRows.forEach(r=>{if(r._mo&&r['Date']){const d=parseDate(r['Date']);if(d)moMap[r._mo]=fmtMonth(d);}});
   const msel=document.getElementById('filterMonth');
   msel.innerHTML='<option value="all">All Months</option>';
-  Object.keys(moMap).sort().forEach(k=>{
-    const o=document.createElement('option');o.value=k;o.textContent=moMap[k];
-    msel.appendChild(o);
-  });
+  Object.keys(moMap).sort().forEach(k=>{const o=document.createElement('option');o.value=k;o.textContent=moMap[k];msel.appendChild(o);});
+
+  // Clients
+  const clients=[...new Set(allRows.map(r=>r['Client / Builder']).filter(Boolean))].sort();
+  const csel=document.getElementById('filterClient');
+  csel.innerHTML='<option value="all">All Clients</option>';
+  clients.forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;csel.appendChild(o);});
+  csel.style.display='';
 }
 
 function setView(v,el){
@@ -488,6 +502,8 @@ function setView(v,el){
   document.querySelectorAll('.nav-item').forEach(i=>i.classList.remove('active'));
   el.classList.add('active');
   document.getElementById('filterWeek').style.display=(v==='weekly')?'':'none';
+  document.getElementById('btnPrintWeekly').style.display=(v==='weekly')?'':'none';
+  document.getElementById('btnPrintMonthly').style.display=(v==='cumulative')?'':'none';
   render();
 }
 function setPtab(el){document.querySelectorAll('.ptab').forEach(t=>t.classList.remove('active'));el.classList.add('active');}
@@ -497,11 +513,13 @@ function getFiltered(){
   const type=document.getElementById('filterType').value;
   const week=document.getElementById('filterWeek').value;
   const month=document.getElementById('filterMonth').value;
+  const client=document.getElementById('filterClient').value;
   return allRows.filter(r=>{
     if(rep!=='all'&&r['Sales Rep']!==rep)return false;
     if(type!=='all'&&r['Customer Type']!==type)return false;
     if(activeView==='weekly'&&week!=='all'&&r._wk!==week)return false;
     if(month!=='all'&&r._mo!==month)return false;
+    if(client!=='all'&&r['Client / Builder']!==client)return false;
     return true;
   });
 }
@@ -517,7 +535,9 @@ function render(){
   else if(activeView==='reps')   renderByRep(rows);
   else if(activeView==='products')renderProducts(rows);
   else if(activeView==='insights')renderInsights(rows);
-  else                           renderPipeline(rows);
+  else if(activeView==='leaderboard') renderLeaderboard(rows);
+  else if(activeView==='clients')    renderClients(rows);
+  else                               renderPipeline(rows);
 }
 
 // ── CUMULATIVE ────────────────────────────────────────────────────────────────
@@ -646,30 +666,67 @@ function renderByRep(rows){
 }
 
 // ── PRODUCTS ──────────────────────────────────────────────────────────────────
+// Product columns in CSV (after migration to value-based)
+const PROD_COLS=['Gutters $','Screen Porch $','Bath HW $','Handrail $','Shower Doors $',
+  'Mirrors $','Shelving $','Locks $','Melamine $','Blinds $','Garage Doors $','Operator $','Glass Shelves $'];
+const PROD_NAMES=['Gutters','Screen Porch','Bath Hardware','Handrail','Shower Doors',
+  'Mirrors','Shelving','Locks','Melamine','Blinds','Garage Doors','Operator','Glass Shelves'];
+
 function renderProducts(rows){
-  const pd=PRODUCTS.map(p=>({name:p,count:rows.filter(r=>r[p]==='Yes').length,valQ:rows.filter(r=>r[p]==='Yes').reduce((s,r)=>s+cleanVal(r['Estimate Value']),0),valS:rows.filter(r=>r[p]==='Yes'&&r['Status']==='Approved').reduce((s,r)=>s+cleanVal(r['Estimate Value']),0)})).sort((a,b)=>b.count-a.count).filter(p=>p.count>0);
-  const top=pd[0]||{name:'—',count:0};const topV=[...pd].sort((a,b)=>b.valS-a.valS)[0]||{name:'—',valS:0};
+  // Try value-based columns first, fallback to Yes/No for legacy data
+  const useValues = rows.some(r=>PROD_COLS.some(c=>cleanVal(r[c])>0));
+
+  let pd;
+  if(useValues){
+    pd=PROD_COLS.map((col,i)=>{
+      const name=PROD_NAMES[i];
+      const all=rows.filter(r=>cleanVal(r[col])>0);
+      const app=all.filter(r=>r['Status']==='Approved');
+      const valQ=all.reduce((s,r)=>s+cleanVal(r[col]),0);
+      const valS=app.reduce((s,r)=>s+cleanVal(r[col]),0);
+      return{name,col,count:all.length,approved:app.length,valQ,valS};
+    }).filter(p=>p.count>0).sort((a,b)=>b.valQ-a.valQ);
+  } else {
+    // Legacy Yes/No fallback
+    pd=PRODUCTS.map(p=>({
+      name:p,col:null,count:rows.filter(r=>r[p]==='Yes').length,
+      approved:rows.filter(r=>r[p]==='Yes'&&r['Status']==='Approved').length,
+      valQ:rows.filter(r=>r[p]==='Yes').reduce((s,r)=>s+cleanVal(r['Estimate Value']),0),
+      valS:rows.filter(r=>r[p]==='Yes'&&r['Status']==='Approved').reduce((s,r)=>s+finalVal(r),0),
+    })).filter(p=>p.count>0).sort((a,b)=>b.valQ-a.valQ);
+  }
+
+  const top=pd[0]||{name:'—',valQ:0};
+  const topV=[...pd].sort((a,b)=>b.valS-a.valS)[0]||{name:'—',valS:0};
+  const totalValQ=pd.reduce((s,p)=>s+p.valQ,0);
+  const totalValS=pd.reduce((s,p)=>s+p.valS,0);
   set(`
   <div class="kpi-grid">
-    ${kpi('Product Lines Active',pd.length,'purple','Unique lines this period')}
-    ${kpi('Most Quoted',top.name,'green',top.count+' estimates')}
-    ${kpi('Top by Revenue',topV.name,'blue',fmt(topV.valS)+' sold')}
-    ${kpi('Total Quoted',fmt(rows.reduce((s,r)=>s+cleanVal(r['Estimate Value']),0)),'','','','font-size:20px')}
-    ${kpi('Total Sold',fmt(rows.filter(r=>r['Status']==='Approved').reduce((s,r)=>s+finalVal(r),0)),'green','','','font-size:20px')}
+    ${kpi('Product Lines Active',pd.length,'purple','Lines with value this period')}
+    ${kpi('Most Quoted (Value)',top.name,'green',fmt(top.valQ)+' quoted')}
+    ${kpi('Top Revenue',topV.name,'blue',fmt(topV.valS)+' sold')}
+    ${kpi('Total Quoted',fmt(totalValQ),'','Product values quoted','','font-size:20px')}
+    ${kpi('Total Sold',fmt(totalValS),'green','Product values sold','','font-size:20px')}
   </div>
-  <div class="charts-row col2">
-    <div class="chart-card"><div class="chart-header"><div class="chart-title">Estimates by Product Line</div></div><div class="chart-wrap h220"><canvas id="pProd"></canvas></div></div>
-    <div class="chart-card"><div class="chart-header"><div class="chart-title">Value Sold by Product Line ($)</div></div><div class="chart-wrap h220"><canvas id="pVal"></canvas></div></div>
+  <div class="charts-row col1">
+    <div class="chart-card">
+      <div class="chart-header"><div><div class="chart-title">Value Quoted vs Value Sold by Product Line ($)</div><div class="chart-subtitle">Based on actual product values — each bar shows real contribution</div></div></div>
+      <div class="chart-wrap h280"><canvas id="pProd"></canvas></div>
+    </div>
   </div>
-  <div class="table-card"><div class="table-header"><div class="table-title">Product Performance</div></div>
-  <table><thead><tr><th>Product</th><th>Estimates</th><th>Value Quoted</th><th>Value Sold</th><th>Conversion</th></tr></thead>
+  <div class="table-card"><div class="table-header"><div class="table-title">Product Performance — Actual Values</div></div>
+  <table><thead><tr><th>Product</th><th>Estimates</th><th>Approved</th><th>Value Quoted</th><th>Value Sold</th><th>Conversion</th></tr></thead>
   <tbody id="prodBody"></tbody></table></div>`);
-  const pc=['#76BC21','#2471A3','#D68910','#8E44AD','#C0392B','#1A8F7A','#E67E22','#2980B9','#27AE60','#8E6B3E','#7F8C8D','#A93226','#2C3E50'];
   const tb=document.getElementById('prodBody');
-  pd.forEach((p,i)=>{const conv=p.valQ?Math.round(p.valS/p.valQ*100):0;const cls=conv>=80?'hi':conv>=60?'md':'lo';
-  tb.innerHTML+=`<tr style="${i%2?'background:var(--panel2)':''}"><td class="rep-bold">${p.name}</td><td style="text-align:right"><span class="badge b-sent">${p.count}</span></td><td>${fmt(p.valQ)}</td><td>${fmt(p.valS)}</td><td><div class="conv ${cls}"><span>${conv}%</span><div class="conv-dot"></div></div></td></tr>`;});
-  buildBarH('pProd',pd.map(p=>p.name),[{label:'Estimates',data:pd.map(p=>p.count),backgroundColor:pc.map(c=>c+'CC'),borderWidth:0,borderRadius:4}],{});
-  buildBarH('pVal',pd.map(p=>p.name),[{label:'Value Sold',data:pd.map(p=>p.valS),backgroundColor:pc.map(c=>c+'CC'),borderWidth:0,borderRadius:4}],{money:true});
+  pd.forEach((p,i)=>{
+    const conv=p.valQ?Math.round(p.valS/p.valQ*100):0;
+    const cls=conv>=80?'hi':conv>=60?'md':'lo';
+    tb.innerHTML+=`<tr style="${i%2?'background:var(--panel2)':''}"><td class="rep-bold">${p.name}</td><td style="text-align:right"><span class="badge b-sent">${p.count}</span></td><td style="text-align:right"><span class="badge b-approved">${p.approved}</span></td><td>${fmt(p.valQ)}</td><td>${fmt(p.valS)}</td><td><div class="conv ${cls}"><span>${conv}%</span><div class="conv-dot"></div></div></td></tr>`;
+  });
+  buildBarH('pProd',pd.map(p=>p.name),[
+    {label:'Value Quoted',data:pd.map(p=>p.valQ),backgroundColor:'rgba(36,113,163,.7)',borderWidth:0,borderRadius:3},
+    {label:'Value Sold',data:pd.map(p=>p.valS),backgroundColor:'rgba(118,188,33,.85)',borderWidth:0,borderRadius:3},
+  ],{money:true,legend:true,stacked:false});
 }
 
 // ── INSIGHTS ──────────────────────────────────────────────────────────────────
@@ -911,6 +968,176 @@ function fmt(n){return'$'+Math.round(n).toLocaleString('en-US');}
 function kpi(label,val,color,sub='',extra='',style=''){
   return`<div class="kpi"><div class="kpi-accent ${color}"></div><div class="kpi-label">${label}</div><div class="kpi-val ${color}" style="${style}">${val}</div>${sub?`<div class="kpi-sub">${sub}</div>`:''}${extra}</div>`;}
 function bdg(t,c){return`<div class="kpi-badge ${c}">${t}</div>`;}
+
+// ── LEADERBOARD ───────────────────────────────────────────────────────────────
+function renderLeaderboard(rows){
+  const approved=rows.filter(r=>r['Status']==='Approved');
+  const repStats=REPS.map(rep=>{
+    const all=rows.filter(r=>r['Sales Rep']===rep);
+    const app=all.filter(r=>r['Status']==='Approved');
+    const lost=all.filter(r=>r['Status']==='Lost');
+    const valS=app.reduce((s,r)=>s+finalVal(r),0);
+    const valQ=all.reduce((s,r)=>s+cleanVal(r['Estimate Value']),0);
+    const conv=all.length?Math.round(app.length/all.length*100):0;
+    const avgT=app.length?Math.round(valS/app.length):0;
+    const lostV=lost.reduce((s,r)=>s+calcLost(r),0);
+    return{rep,all:all.length,app:app.length,lost:lost.length,valS,valQ,conv,avgT,lostV};
+  }).filter(r=>r.all>0);
+
+  // Rankings
+  const byConv=[...repStats].sort((a,b)=>b.conv-a.conv);
+  const byRevenue=[...repStats].sort((a,b)=>b.valS-a.valS);
+  const byVolume=[...repStats].sort((a,b)=>b.all-a.all);
+  const byTicket=[...repStats].sort((a,b)=>b.avgT-a.avgT);
+  const byLeast=[...repStats].sort((a,b)=>a.lostV-b.lostV);
+
+  function medal(i){return i===0?'🥇':i===1?'🥈':i===2?'🥉':'  #'+(i+1);}
+  function lbCard(title,icon,sorted,valFn,fmtFn){
+    return`<div class="chart-card">
+      <div class="chart-header"><div class="chart-title">${icon} ${title}</div></div>
+      ${sorted.map((r,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 4px;border-bottom:1px solid var(--lgray);${i===0?'background:var(--mint);border-radius:6px;padding:10px 8px;':''}">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:18px">${medal(i)}</span>
+          <span style="font-weight:${i===0?'700':'500'};font-size:13px;color:var(--dark)">${r.rep.split(' ')[0]}</span>
+        </div>
+        <span style="font-weight:700;font-size:13px;color:${i===0?'var(--deep)':'var(--dark)'}">${fmtFn(valFn(r))}</span>
+      </div>`).join('')}
+    </div>`;
+  }
+
+  set(`
+  <div class="kpi-grid">
+    ${kpi('Top Rep (Revenue)',byRevenue[0]?byRevenue[0].rep.split(' ')[0]:'—','green',byRevenue[0]?fmt(byRevenue[0].valS)+' sold':'')}
+    ${kpi('Top Conversion',byConv[0]?byConv[0].rep.split(' ')[0]:'—','blue',byConv[0]?byConv[0].conv+'%':'')}
+    ${kpi('Most Active',byVolume[0]?byVolume[0].rep.split(' ')[0]:'—','purple',byVolume[0]?byVolume[0].all+' estimates':'')}
+    ${kpi('Highest Avg Ticket',byTicket[0]?byTicket[0].rep.split(' ')[0]:'—','amber',byTicket[0]?fmt(byTicket[0].avgT):'')}
+    ${kpi('Fewest Losses',byLeast[0]?byLeast[0].rep.split(' ')[0]:'—','green',byLeast[0]?fmt(byLeast[0].lostV)+' lost':'')}
+  </div>
+  <div class="charts-row col3">
+    ${lbCard('Top Revenue','💰',byRevenue,r=>r.valS,fmt)}
+    ${lbCard('Best Conversion Rate','🎯',byConv,r=>r.conv,v=>v+'%')}
+    ${lbCard('Most Estimates Submitted','📋',byVolume,r=>r.all,v=>v+' estimates')}
+  </div>
+  <div class="charts-row col2">
+    ${lbCard('Highest Avg Ticket','🏆',byTicket,r=>r.avgT,fmt)}
+    ${lbCard('Least Value Lost','🛡',byLeast,r=>r.lostV,fmt)}
+  </div>
+  <div class="table-card"><div class="table-header"><div class="table-title">Full Rep Scorecard</div></div>
+  <table><thead><tr><th>Rep</th><th>Estimates</th><th>Approved</th><th>Lost</th><th>Conversion</th><th>Avg Ticket</th><th>Value Sold</th><th>Value Lost</th></tr></thead>
+  <tbody>${repStats.sort((a,b)=>b.valS-a.valS).map((r,i)=>{const c=r.conv>=80?'hi':r.conv>=60?'md':'lo';return`<tr style="${i%2?'background:var(--panel2)':''}"><td class="rep-bold">${r.rep}</td><td style="text-align:right">${r.all}</td><td style="text-align:right"><span class="badge b-approved">${r.app}</span></td><td style="text-align:right">${r.lost?`<span class="badge b-lost">${r.lost}</span>`:'—'}</td><td><div class="conv ${c}" style="justify-content:flex-end"><span>${r.conv}%</span><div class="conv-dot"></div></div></td><td style="text-align:right">${r.avgT?fmt(r.avgT):'—'}</td><td style="text-align:right">${fmt(r.valS)}</td><td style="text-align:right">${r.lostV?fmt(r.lostV):'—'}</td></tr>`;}).join('')}
+  <tr class="total-row"><td>TOTAL</td><td style="text-align:right">${repStats.reduce((s,r)=>s+r.all,0)}</td><td style="text-align:right">${repStats.reduce((s,r)=>s+r.app,0)}</td><td style="text-align:right">${repStats.reduce((s,r)=>s+r.lost,0)}</td><td>—</td><td style="text-align:right">${repStats.reduce((s,r)=>s+r.app,0)?fmt(Math.round(repStats.reduce((s,r)=>s+r.valS,0)/repStats.reduce((s,r)=>s+r.app,0))):'—'}</td><td style="text-align:right">${fmt(repStats.reduce((s,r)=>s+r.valS,0))}</td><td style="text-align:right">${fmt(repStats.reduce((s,r)=>s+r.lostV,0))}</td></tr>
+  </tbody></table></div>`);
+}
+
+// ── CLIENTS ───────────────────────────────────────────────────────────────────
+function renderClients(rows){
+  const clientMap={};
+  rows.forEach(r=>{
+    const c=r['Client / Builder'];if(!c)return;
+    if(!clientMap[c])clientMap[c]={name:c,type:r['Customer Type']||'',city:r['City']||'',zip:(r['State / ZIP']||'').split(' ')[1]||'',estimates:[],valQ:0,valS:0,lost:0};
+    clientMap[c].estimates.push(r);
+    clientMap[c].valQ+=cleanVal(r['Estimate Value']);
+    if(r['Status']==='Approved')clientMap[c].valS+=finalVal(r);
+    if(r['Status']==='Lost')clientMap[c].lost++;
+  });
+
+  const clients=Object.values(clientMap).sort((a,b)=>b.valQ-a.valQ);
+  const topClient=clients[0]||{name:'—',valQ:0};
+  const repeat=clients.filter(c=>c.estimates.length>1);
+
+  set(`
+  <div class="kpi-grid">
+    ${kpi('Unique Clients',clients.length,'blue','In selected period')}
+    ${kpi('Repeat Clients',repeat.length,'green',repeat.length+' with 2+ estimates')}
+    ${kpi('Top Client',topClient.name,'purple',fmt(topClient.valQ)+' quoted')}
+    ${kpi('Avg per Client',clients.length?fmt(Math.round(clients.reduce((s,c)=>s+c.valQ,0)/clients.length)):'—','blue','Value quoted per client')}
+    ${kpi('Total Clients',clients.length,'blue',clients.filter(c=>c.type==='Builder').length+' Builder · '+clients.filter(c=>c.type==='Homeowner').length+' HO')}
+  </div>
+  <div class="charts-row col1">
+    <div class="chart-card">
+      <div class="chart-header"><div class="chart-title">Top 10 Clients by Value Quoted</div></div>
+      <div class="chart-wrap h280"><canvas id="cClients"></canvas></div>
+    </div>
+  </div>
+  <div class="table-card"><div class="table-header"><div class="table-title">Client Detail — All Estimates</div></div>
+  <table><thead><tr><th>Client</th><th>Type</th><th>City</th><th>Estimates</th><th>Approved</th><th>Lost</th><th>Value Quoted</th><th>Value Sold</th></tr></thead>
+  <tbody>${clients.map((c,i)=>{const app=c.estimates.filter(e=>e['Status']==='Approved').length;const cls=c.estimates.length>1?'style="background:rgba(118,188,33,.07)"':'';return`<tr ${cls} style="${i%2&&!c.estimates.length>1?'background:var(--panel2)':''}"><td class="rep-bold">${c.name}</td><td>${c.type}</td><td style="color:var(--mid);font-size:11px">${c.city}</td><td style="text-align:right">${c.estimates.length}${c.estimates.length>1?' <span class="badge b-approved" style="font-size:9px">repeat</span>':''}</td><td style="text-align:right"><span class="badge b-approved">${app}</span></td><td style="text-align:right">${c.lost?`<span class="badge b-lost">${c.lost}</span>`:'—'}</td><td style="text-align:right">${fmt(c.valQ)}</td><td style="text-align:right">${fmt(c.valS)}</td></tr>`;}).join('')}
+  </tbody></table></div>`);
+
+  const top10=clients.slice(0,10);
+  buildBarH('cClients',top10.map(c=>c.name),[
+    {label:'Value Quoted',data:top10.map(c=>c.valQ),backgroundColor:'rgba(36,113,163,.7)',borderWidth:0,borderRadius:3},
+    {label:'Value Sold',data:top10.map(c=>c.valS),backgroundColor:'rgba(118,188,33,.85)',borderWidth:0,borderRadius:3},
+  ],{money:true,legend:true,stacked:false});
+}
+
+// ── PRINT REPORTS ─────────────────────────────────────────────────────────────
+function printReport(type){
+  const rows=getFiltered();
+  const s=stats(rows);
+  const w=allWks(rows);
+  const now=new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
+  const title=type==='weekly'?'Weekly Sales Report':'Monthly Sales Report';
+
+  const repRows=REPS.filter(rep=>rows.some(r=>r['Sales Rep']===rep)).map(rep=>{
+    const rr=rows.filter(r=>r['Sales Rep']===rep);
+    const app=rr.filter(r=>r['Status']==='Approved').length;
+    const vq=rr.reduce((a,r)=>a+cleanVal(r['Estimate Value']),0);
+    const vs=rr.filter(r=>r['Status']==='Approved').reduce((a,r)=>a+finalVal(r),0);
+    const conv=rr.length?Math.round(app/rr.length*100):0;
+    return`<tr><td>${rep}</td><td>${rr.length}</td><td>${app}</td><td>${conv}%</td><td>${fmt(vq)}</td><td>${fmt(vs)}</td></tr>`;
+  }).join('');
+
+  const detailRows=rows.map(r=>`<tr><td>${r['Date']||''}</td><td>${r['Sales Rep']||''}</td><td>${r['Client / Builder']||''}</td><td>${r['Customer Type']||''}</td><td>${r['Status']||''}</td><td style="text-align:right">${r['Estimate Value']?fmt(cleanVal(r['Estimate Value'])):''}</td></tr>`).join('');
+
+  const win=window.open('','_blank');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${title}</title>
+  <style>
+    @page{size:A4;margin:18mm 15mm}
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Arial,sans-serif;font-size:9pt;color:#333}
+    .header{display:flex;justify-content:space-between;align-items:center;padding-bottom:10px;border-bottom:2px solid #76BC21;margin-bottom:16px}
+    .logo{font-size:18pt;font-weight:900;color:#76BC21;letter-spacing:-1px}
+    .logo span{color:#333}
+    .report-title{text-align:right}
+    .report-title h1{font-size:14pt;color:#333;font-weight:700}
+    .report-title p{font-size:8pt;color:#888;margin-top:2px}
+    .kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
+    .kpi{border:1px solid #ddd;border-top:3px solid #76BC21;border-radius:6px;padding:10px}
+    .kpi-label{font-size:7pt;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#888;margin-bottom:4px}
+    .kpi-val{font-size:18pt;font-weight:900;color:#333;letter-spacing:-1px}
+    .kpi-val.green{color:#5A9A18}
+    .section-title{font-size:8pt;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#76BC21;margin-bottom:6px;margin-top:14px;padding-bottom:4px;border-bottom:1px solid #ddd}
+    table{width:100%;border-collapse:collapse;font-size:8pt}
+    thead th{background:#333;color:#fff;padding:6px 8px;text-align:left;font-weight:700;font-size:7pt;text-transform:uppercase;letter-spacing:.05em}
+    thead th:not(:first-child){text-align:right}
+    tbody tr:nth-child(even){background:#F5F5F2}
+    tbody tr td{padding:5px 8px;border-bottom:1px solid #eee}
+    tbody tr td:not(:first-child){text-align:right}
+    .footer{margin-top:20px;padding-top:8px;border-top:1px solid #ddd;font-size:7pt;color:#888;display:flex;justify-content:space-between}
+  </style></head><body>
+  <div class="header">
+    <div class="logo">Green<span>Hill</span> Products</div>
+    <div class="report-title"><h1>${title}</h1><p>Generated ${now}</p></div>
+  </div>
+  <div class="kpi-row">
+    <div class="kpi"><div class="kpi-label">Total Estimates</div><div class="kpi-val">${s.total}</div></div>
+    <div class="kpi"><div class="kpi-label">Approved</div><div class="kpi-val green">${s.approved}</div></div>
+    <div class="kpi"><div class="kpi-label">Conversion</div><div class="kpi-val">${s.conv}%</div></div>
+    <div class="kpi"><div class="kpi-label">Value Sold</div><div class="kpi-val green">${fmt(s.valS)}</div></div>
+  </div>
+  <div class="section-title">Performance by Sales Rep</div>
+  <table><thead><tr><th>Sales Rep</th><th>Estimates</th><th>Approved</th><th>Conversion</th><th>Value Quoted</th><th>Value Sold</th></tr></thead>
+  <tbody>${repRows}</tbody></table>
+  <div class="section-title">Estimate Detail</div>
+  <table><thead><tr><th>Date</th><th>Rep</th><th>Client</th><th>Type</th><th>Status</th><th>Value</th></tr></thead>
+  <tbody>${detailRows}</tbody></table>
+  <div class="footer"><span>GreenHill Products Inc. · Sales Report</span><span>${now}</span></div>
+  </body></html>`);
+  win.document.close();
+  setTimeout(()=>win.print(),500);
+}
+
 </script>
 </body>
 </html>
